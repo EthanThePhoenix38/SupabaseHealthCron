@@ -1,4 +1,4 @@
-name: Supabase Health Watchdog
+name: Supabase Health - Alert (server_alert)
 
 on:
   schedule:
@@ -9,14 +9,14 @@ permissions:
   contents: write
 
 jobs:
-  healthcheck:
+  alert:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Supabase health check (silent)
+      - name: Health check (silent)
         id: health
         shell: bash
         run: |
@@ -40,60 +40,43 @@ jobs:
             echo "status=ko" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Update failure counter / reset on recovery
+      - name: Update counter and alert if needed
         shell: bash
         run: |
           set -euo pipefail
 
-          COUNTER_FILE=".supabase_health_failures"
-          ALERT_FILE=".supabase_health_alert"
+          mkdir -p health
 
+          COUNTER_FILE="health/failures.txt"
+          ALERT_FLAG="health/alert_active.flag"
+          LOG_FILE="health/logs.txt"
+          THRESHOLD=72
+
+          # Si OK -> reset uniquement du compteur (pas de recovery ici)
           if [[ "${{ steps.health.outputs.status }}" == "ok" ]]; then
-            rm -f "$COUNTER_FILE" "$ALERT_FILE"
+            rm -f "$COUNTER_FILE"
             exit 0
           fi
 
+          # KO -> incrémente compteur
           count=0
-          [[ -f "$COUNTER_FILE" ]] && count="$(cat "$COUNTER_FILE")"
+          [[ -f "$COUNTER_FILE" ]] && count="$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)"
           count=$((count + 1))
           echo "$count" > "$COUNTER_FILE"
 
-      - name: Commit alert after 6h KO
-        shell: bash
-        run: |
-          set -euo pipefail
+          # Si déjà en état alert, on ne spam pas
+          [[ -f "$ALERT_FLAG" ]] && exit 0
 
-          COUNTER_FILE=".supabase_health_failures"
-          ALERT_FILE=".supabase_health_alert"
-          THRESHOLD=72
-
-          [[ -f "$ALERT_FILE" ]] && exit 0
-          [[ ! -f "$COUNTER_FILE" ]] && exit 0
-
-          count="$(cat "$COUNTER_FILE")"
-
+          # Déclenche l'alerte après 6h (72 * 5min)
           if (( count >= THRESHOLD )); then
-            date -u +"%Y-%m-%dT%H:%M:%SZ" > "$ALERT_FILE"
+            ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            echo "$ts" > "$ALERT_FLAG"
+            echo "$ts server_alert failures=$count" >> "$LOG_FILE"
 
             git config user.name "supabase-health-bot"
             git config user.email "health-bot@users.noreply.github.com"
 
-            git add "$ALERT_FILE" "$COUNTER_FILE"
-            git commit -m "alert: Supabase health KO depuis 6h"
+            git add health
+            git commit -m "server_alert: Supabase health KO depuis 6h"
             git push
           fi
-
-      - name: Commit recovery
-        if: steps.health.outputs.status == 'ok'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          git status --porcelain | grep -q . || exit 0
-
-          git config user.name "supabase-health-bot"
-          git config user.email "health-bot@users.noreply.github.com"
-
-          git add .
-          git commit -m "recovery: Supabase health OK"
-          git push
