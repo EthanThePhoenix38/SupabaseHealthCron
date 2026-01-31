@@ -1,0 +1,185 @@
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SupabaseCronHealth</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown-dark.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+
+  <style>
+    :root{
+      --bg: #0b1020;
+      --panel: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.12);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.70);
+      --shadow: 0 10px 40px rgba(0,0,0,0.45);
+      --radius: 14px;
+      --max: 980px;
+    }
+
+    body{
+      margin:0;
+      background: radial-gradient(1200px 600px at 50% -10%, rgba(45,120,255,0.30), transparent 55%),
+                  radial-gradient(900px 500px at 110% 20%, rgba(0,190,255,0.18), transparent 55%),
+                  radial-gradient(900px 500px at -10% 70%, rgba(0,255,180,0.10), transparent 55%),
+                  var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      line-height: 1.55;
+    }
+
+    .wrap{
+      max-width: var(--max);
+      margin: 42px auto;
+      padding: 0 18px 60px;
+    }
+
+    .hero{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .hero img{
+      width: 100%;
+      display: block;
+    }
+
+    .content{
+      margin-top: 18px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }
+
+    .markdown-body{
+      background: transparent;
+    }
+
+    .footer{
+      margin-top: 18px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    a { color: #79c0ff; }
+    a:hover { opacity: 0.92; }
+
+    .status{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 14px;
+      background: rgba(0,0,0,0.14);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .pill{
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <img src="./banner.png" alt="SupabaseCronHealth Banner" />
+    </div>
+
+    <div class="content">
+      <div class="status">
+        <div id="statusText">Loading README.md from GitHub API</div>
+        <div class="pill" id="repoPill">ThePhoenixAgency/SupabaseCronHealth</div>
+      </div>
+
+      <article id="md" class="markdown-body"></article>
+    </div>
+
+    <div class="footer">
+      ThePhoenixAgency - <a href="http://ThePhoenixAgency.Github.io">http://ThePhoenixAgency.Github.io</a>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+  <script>
+    const owner = "ThePhoenixAgency";
+    const repo = "SupabaseCronHealth";
+    const branch = "main";
+
+    const statusText = document.getElementById("statusText");
+    const mdEl = document.getElementById("md");
+    const repoPill = document.getElementById("repoPill");
+
+    repoPill.textContent = `${owner}/${repo}`;
+
+    marked.setOptions({
+      gfm: true,
+      breaks: false,
+      highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
+        return hljs.highlightAuto(code).value;
+      }
+    });
+
+    async function loadReadmeViaGitHubAPI() {
+      const url = `https://api.github.com/repos/${owner}/${repo}/readme`;
+
+      const res = await fetch(url, {
+        headers: {
+          "Accept": "application/vnd.github.raw+json"
+        }
+      });
+
+      if (!res.ok) {
+        throw new Error(`GitHub API error: ${res.status}`);
+      }
+
+      const text = await res.text();
+      return text;
+    }
+
+    (async () => {
+      try {
+        statusText.textContent = "README loaded";
+        const md = await loadReadmeViaGitHubAPI();
+        mdEl.innerHTML = marked.parse(md);
+
+        mdEl.querySelectorAll("pre code").forEach((block) => {
+          hljs.highlightElement(block);
+        });
+
+        const links = mdEl.querySelectorAll("a[href]");
+        links.forEach(a => {
+          a.setAttribute("target", "_blank");
+          a.setAttribute("rel", "noopener noreferrer");
+        });
+      } catch (err) {
+        statusText.textContent = "README load failed";
+        mdEl.innerHTML = `<pre>${String(err)}</pre>`;
+      }
+    })();
+ 
