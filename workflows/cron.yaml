@@ -1,0 +1,99 @@
+name: Supabase Health Watchdog
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  healthcheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Supabase health check (silent)
+        id: health
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_URL="${{ secrets.SUPABASE_BULLETIN_URL }}"
+          ANON_KEY="${{ secrets.SUPABASE_BULLETIN_ANON_KEY }}"
+
+          BASE_URL="${BASE_URL%/}"
+          HEALTH_URL="${BASE_URL}/auth/v1/health"
+
+          code="$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "apikey: ${ANON_KEY}" \
+            -H "Authorization: Bearer ${ANON_KEY}" \
+            -H "Accept: application/json" \
+            "${HEALTH_URL}" || true)"
+
+          if [[ "$code" == "200" ]]; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=ko" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update failure counter / reset on recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COUNTER_FILE=".supabase_health_failures"
+          ALERT_FILE=".supabase_health_alert"
+
+          if [[ "${{ steps.health.outputs.status }}" == "ok" ]]; then
+            rm -f "$COUNTER_FILE" "$ALERT_FILE"
+            exit 0
+          fi
+
+          count=0
+          [[ -f "$COUNTER_FILE" ]] && count="$(cat "$COUNTER_FILE")"
+          count=$((count + 1))
+          echo "$count" > "$COUNTER_FILE"
+
+      - name: Commit alert after 6h KO
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COUNTER_FILE=".supabase_health_failures"
+          ALERT_FILE=".supabase_health_alert"
+          THRESHOLD=72
+
+          [[ -f "$ALERT_FILE" ]] && exit 0
+          [[ ! -f "$COUNTER_FILE" ]] && exit 0
+
+          count="$(cat "$COUNTER_FILE")"
+
+          if (( count >= THRESHOLD )); then
+            date -u +"%Y-%m-%dT%H:%M:%SZ" > "$ALERT_FILE"
+
+            git config user.name "supabase-health-bot"
+            git config user.email "health-bot@users.noreply.github.com"
+
+            git add "$ALERT_FILE" "$COUNTER_FILE"
+            git commit -m "alert: Supabase health KO depuis 6h"
+            git push
+          fi
+
+      - name: Commit recovery
+        if: steps.health.outputs.status == 'ok'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git status --porcelain | grep -q . || exit 0
+
+          git config user.name "supabase-health-bot"
+          git config user.email "health-bot@users.noreply.github.com"
+
+          git add .
+          git commit -m "recovery: Supabase health OK"
+          git push
