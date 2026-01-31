@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout default branch (read-only)
         uses: actions/checkout@v4
 
-      - name: Health check (silent)
+      - name: Supabase health check (silent)
         id: health
         shell: bash
         run: |
@@ -40,7 +40,18 @@ jobs:
             echo "status=ko" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit recovery if alert was active
+      - name: Switch to health-events branch (write only here)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin health-events || true
+          if git show-ref --verify --quiet refs/remotes/origin/health-events; then
+            git checkout -B health-events origin/health-events
+          else
+            git checkout -B health-events
+          fi
+
+      - name: Commit recovery when back OK (only if alert was active)
         shell: bash
         run: |
           set -euo pipefail
@@ -51,19 +62,16 @@ jobs:
           ALERT_FLAG="health/alert_active.flag"
           LOG_FILE="health/logs.txt"
 
-          # Si KO -> on ne fait rien ici
+          # If still KO, no recovery.
           if [[ "${{ steps.health.outputs.status }}" != "ok" ]]; then
             exit 0
           fi
 
-          # Si OK mais pas d'alerte active -> rien (évite spam)
+          # If OK but no active alert, do nothing (no spam).
           if [[ ! -f "$ALERT_FLAG" ]]; then
-            # reset compteur si présent
-            rm -f "$COUNTER_FILE"
             exit 0
           fi
 
-          # OK + alerte active -> recovery
           ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           echo "$ts server_recovery" >> "$LOG_FILE"
 
@@ -72,6 +80,10 @@ jobs:
           git config user.name "supabase-health-bot"
           git config user.email "health-bot@users.noreply.github.com"
 
-          git add health
-          git commit -m "server_recovery: Supabase health OK"
-          git push
+          git add "$LOG_FILE"
+          git add -u
+          git commit -m "server_recovery: Supabase Bulletin server back online" \
+            -m "The Supabase server used by Bulletin has recovered." \
+            -m "See logs and history here:" \
+            -m "https://github.com/ThePhoenixAgency/SupabaseCronHealth"
+          git push -u origin health-events
